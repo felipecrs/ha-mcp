@@ -87,7 +87,8 @@ def _gate(auth_mode: str, *, accepts: bool) -> dict:
     if auth_mode == WEBHOOK_AUTH_HA:
         return {
             "resource_server": SimpleNamespace(
-                validate_request=AsyncMock(return_value=accepts)
+                validate_request=AsyncMock(return_value=accepts),
+                identity_headers=AsyncMock(return_value={} if accepts else None),
             )
         }
     if auth_mode == WEBHOOK_AUTH_LEGACY:

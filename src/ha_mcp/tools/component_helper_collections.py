@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import time
-import weakref
 from typing import Any, NoReturn
 
 from ..client.rest_client import (
@@ -20,6 +19,7 @@ from ..client.rest_client import (
 )
 from ..client.websocket_client import get_websocket_client
 from ..errors import ErrorCode, create_error_response
+from ..per_user import ClientKeyedCache
 from .component_api import (
     component_supports,
     get_component_caps,
@@ -38,9 +38,7 @@ HELPER_CAPABILITIES = ("helper_schemas", "helper_item", "helper_write")
 
 # Core's schemas change only with a Core upgrade, which restarts the WS session.
 _SCHEMA_TTL_S = 300.0
-_SCHEMA_CACHE: weakref.WeakKeyDictionary[Any, tuple[float, dict[str, Any]]] = (
-    weakref.WeakKeyDictionary()
-)
+_SCHEMA_CACHE: ClientKeyedCache[tuple[float, dict[str, Any]]] = ClientKeyedCache()
 
 
 async def _component_ws(client: Any) -> Any | None:

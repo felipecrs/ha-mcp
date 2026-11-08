@@ -19,7 +19,6 @@ import asyncio
 import json
 import logging
 import time
-import weakref
 from typing import Annotated, Any, NoReturn
 
 from pydantic import Field
@@ -28,6 +27,7 @@ from ha_mcp._vendor.fastmcp.exceptions import ToolError
 from ha_mcp._vendor.fastmcp.tools import tool
 
 from ..errors import ErrorCode, create_error_response
+from ..per_user import ClientKeyedCache
 from .auto_backup import with_auto_backup
 from .component_api import ComponentCaps, get_component_caps
 from .config_entry_flow import COMPONENT_DOMAIN as MCP_TOOLS_DOMAIN
@@ -113,19 +113,15 @@ def _version_tuple(version: str) -> tuple[int, ...]:
 # Weak-keyed by client object to support multi-client setups and self-evict
 # when a client is garbage-collected (avoids id() reuse if a freed client's
 # address gets recycled before the unauthorized-retry fires).
-_CALLER_TOKEN_CACHE: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
+_CALLER_TOKEN_CACHE: ClientKeyedCache[str] = ClientKeyedCache()
 # Component version as reported by the REST bootstrap, keyed like the token
 # cache. Populated in ``_fetch_caller_token``, which already parses and
 # validates it. Feature-scoped version gates read this rather than the
 # WebSocket capability handshake: caps come back ``None`` for a transport
 # blip just as they do for an old component, so gating on them would report
 # a momentary socket drop as "your component is too old".
-_COMPONENT_VERSION_CACHE: weakref.WeakKeyDictionary[Any, str] = (
-    weakref.WeakKeyDictionary()
-)
-_CALLER_TOKEN_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = (
-    weakref.WeakKeyDictionary()
-)
+_COMPONENT_VERSION_CACHE: ClientKeyedCache[str] = ClientKeyedCache()
+_CALLER_TOKEN_LOCKS: ClientKeyedCache[asyncio.Lock] = ClientKeyedCache()
 
 # How long a live service-registry verdict stays memoized (see
 # ``_probe_tools_services``). 30 seconds deliberately matches
@@ -137,13 +133,9 @@ _LIVE_TOOLS_PROBE_TTL_S = 30.0
 # ``(verdict, monotonic_time)`` per client, keyed exactly like
 # ``_CALLER_TOKEN_CACHE`` / ``_COMPONENT_VERSION_CACHE`` above so the entry
 # self-evicts with the client and multi-client setups stay separate.
-_LIVE_TOOLS_PROBE_CACHE: weakref.WeakKeyDictionary[Any, tuple[bool, float]] = (
-    weakref.WeakKeyDictionary()
-)
+_LIVE_TOOLS_PROBE_CACHE: ClientKeyedCache[tuple[bool, float]] = ClientKeyedCache()
 # Per-client refresh locks for the memo above (see ``_probe_tools_services``).
-_LIVE_TOOLS_PROBE_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = (
-    weakref.WeakKeyDictionary()
-)
+_LIVE_TOOLS_PROBE_LOCKS: ClientKeyedCache[asyncio.Lock] = ClientKeyedCache()
 
 
 def _monotonic() -> float:

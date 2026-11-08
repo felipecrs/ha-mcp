@@ -37,7 +37,6 @@ authorization-server document pointing at :mod:`oauth_autoapprove`'s endpoints)
 
 from __future__ import annotations
 
-import inspect
 import logging
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
@@ -59,6 +58,14 @@ from .const import (
     WEBHOOK_AUTH_HA,
     WEBHOOK_AUTH_LEGACY,
     WEBHOOK_AUTH_NONE,
+)
+from .mcp_endpoint import (
+    MCP_PATH,
+    PROTECTED_RESOURCE_PATH,
+    USER_ADMIN_HEADER,
+    USER_ID_HEADER,
+    ResourceServer,
+    bind_mcp_endpoint,
 )
 from .oauth_autoapprove import (
     CFG_AUTOAPPROVE_PROVIDER,
@@ -99,9 +106,9 @@ def _unregister_webhook(hass: HomeAssistant, webhook_id: str) -> None:
 # Human-readable webhook name shown in the HA webhook registry.
 _WEBHOOK_NAME = "HA-MCP in-process server"
 
-# Hop-by-hop / sensitive request headers never forwarded upstream (identical set
-# to mcp_proxy). ``authorization`` is stripped because the server authenticates
-# to HA with its own administrator token, not the caller's bearer.
+# Hop-by-hop / sensitive request headers never forwarded as sent. ``authorization``
+# and the identity headers go upstream only as set by ResourceServer, after it
+# validated the caller; legacy and none modes run with the server's own token.
 _STRIPPED_REQUEST_HEADERS = frozenset(
     {
         "host",
@@ -110,6 +117,8 @@ _STRIPPED_REQUEST_HEADERS = frozenset(
         "connection",
         "cookie",
         "authorization",
+        USER_ID_HEADER.lower(),
+        USER_ADMIN_HEADER.lower(),
     }
 )
 
@@ -205,65 +214,6 @@ def _authorization_server_document(base: str) -> dict[str, Any]:
         "token_endpoint_auth_methods_supported": ["none"],
         "client_id_metadata_document_supported": True,
     }
-
-
-class ResourceServer:
-    """ha_auth resource server: bearer validation + discovery URL building.
-
-    Owns no signing key, no client credentials, and binds no root views — HA core
-    is the authorization server. Held by the discovery views and the webhook
-    handler.
-    """
-
-    def __init__(self, hass: HomeAssistant, webhook_id: str) -> None:
-        """Bind to the HA instance and this install's webhook id."""
-        self._hass = hass
-        self._webhook_id = webhook_id
-
-    @property
-    def webhook_id(self) -> str:
-        """This install's private webhook id."""
-        return self._webhook_id
-
-    async def validate_request(self, request: web.Request) -> bool:
-        """Return True iff the request carries a Bearer token HA core accepts.
-
-        A missing/malformed ``Authorization`` header is rejected without touching
-        the validator. ``hass.auth.async_validate_access_token`` is a synchronous
-        ``@callback`` in HA core; it is awaited defensively in case a future
-        release makes it a coroutine, and any raise is treated as unauthorized so
-        a crafted token yields a 401 challenge rather than a 500.
-        """
-        header = request.headers.get("Authorization", "")
-        if not header.lower().startswith("bearer "):
-            return False
-        token = header[7:].strip()
-        if not token:
-            return False
-        try:
-            result = self._hass.auth.async_validate_access_token(token)
-            if inspect.isawaitable(result):
-                result = await result
-        except Exception:
-            _LOGGER.debug(
-                "ha_auth: bearer validation raised; treating as unauthorized",
-                exc_info=True,
-            )
-            return False
-        if result is None:
-            return False
-        # ADMIN-ONLY: the server performs every Home Assistant operation with
-        # its own ADMIN token, so accepting any valid login would
-        # grant every household member admin-equivalent control. Require an
-        # active, human, administrator account (mirrors the settings panel).
-        user = getattr(result, "user", None)
-        if user is None:
-            return False
-        if getattr(user, "system_generated", False):
-            return False
-        if not getattr(user, "is_active", False):
-            return False
-        return bool(getattr(user, "is_admin", False))
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +524,11 @@ def _build_unauthorized_response(
     if isinstance(request, MockRequest):
         return web.Response(status=400, text=OAUTH_UNAVAILABLE)
     base = _build_base_url(request)
+    path = getattr(request, "path", "")
+    if path == MCP_PATH or endpoint_suffix(path, MCP_PATH):
+        return _challenge(
+            f"{base}{PROTECTED_RESOURCE_PATH}{endpoint_suffix(path, MCP_PATH)}"
+        )
     # RFC 9728 §3.1 path-scoped location. The pointer names the id, but this
     # 401 is only produced on a request TO /api/webhook/<id>, so the caller
     # already holds it; there is no fixed-path document to point at (see
@@ -581,9 +536,12 @@ def _build_unauthorized_response(
     metadata_url = (
         f"{base}/.well-known/oauth-protected-resource/api/webhook/{webhook_id}"
     )
-    metadata_url += endpoint_suffix(
-        getattr(request, "path", ""), f"/api/webhook/{webhook_id}"
-    )
+    metadata_url += endpoint_suffix(path, f"/api/webhook/{webhook_id}")
+    return _challenge(metadata_url)
+
+
+def _challenge(metadata_url: str) -> web.Response:
+    """The 401 pointing a client at the protected-resource document."""
     return web.Response(
         status=401,
         text="Unauthorized",
@@ -623,6 +581,32 @@ async def _check_webhook_auth(
     return None
 
 
+async def _forward_identity(
+    request: web.Request, cfg: dict[str, Any]
+) -> dict[str, str] | web.StreamResponse:
+    """The identity headers to forward, or the response refusing the caller."""
+    auth_response = await _check_webhook_auth(request, cfg)
+    if auth_response is not None:
+        return auth_response
+    resource_server: ResourceServer | None = cfg.get("resource_server")
+    if resource_server is None:
+        return {}
+    identity = await resource_server.identity_headers(request)
+    return _build_unauthorized_response(request, cfg) if identity is None else identity
+
+
+def _forward_headers(request: web.Request, identity: dict[str, str]) -> dict[str, str]:
+    """The request's safe headers plus the caller's validated identity."""
+    return {
+        **{
+            key: value
+            for key, value in request.headers.items()
+            if key.lower() not in _STRIPPED_REQUEST_HEADERS
+        },
+        **identity,
+    }
+
+
 async def _async_handle_webhook(
     hass: HomeAssistant,
     webhook_id: str,
@@ -637,9 +621,9 @@ async def _async_handle_webhook(
     if not isinstance(cfg, dict):
         return web.Response(status=503, text="MCP server is not available")
 
-    auth_response = await _check_webhook_auth(request, cfg)
-    if auth_response is not None:
-        return auth_response
+    identity = await _forward_identity(request, cfg)
+    if not isinstance(identity, dict):
+        return identity
 
     target_url = forward_url(cfg["target_url"], suffix, read_only=read_only)
     session: aiohttp.ClientSession = cfg["session"]
@@ -649,11 +633,7 @@ async def _async_handle_webhook(
     cloudhook = isinstance(request, MockRequest)
     body = await (request.content.read() if cloudhook else request.read())
 
-    forward_headers = {
-        key: value
-        for key, value in request.headers.items()
-        if key.lower() not in _STRIPPED_REQUEST_HEADERS
-    }
+    forward_headers = _forward_headers(request, identity)
 
     try:
         async with session.request(
@@ -727,10 +707,13 @@ def _bind_ha_auth_surface(
     cfg: dict[str, Any],
     webhook_id: str,
     dcr_signing_key: str | None,
+    *,
+    per_user: bool,
 ) -> None:
     """Bind the ha_auth surface (fail-closed) and mark cfg's live providers."""
-    provider = ResourceServer(hass, webhook_id)
+    provider = ResourceServer(hass, webhook_id, per_user=per_user)
     _register_metadata_views(hass)
+    bind_mcp_endpoint(hass, _async_handle_webhook, _build_base_url)
     bind_autoapprove_views(hass)
     bind_dcr_view(hass)
     cfg["resource_server"] = provider
@@ -839,6 +822,7 @@ async def async_register_webhook(
     oauth_client_secret: str | None = None,
     oauth_signing_key: str | None = None,
     dcr_signing_key: str | None = None,
+    per_user: bool = False,
 ) -> bool:
     """Register the ingress webhook (and, for ha_auth/legacy, the OAuth surface).
 
@@ -921,7 +905,9 @@ async def async_register_webhook(
             )
             register_readonly_webhook(hass, webhook_id, _async_handle_webhook)
             if auth_mode == WEBHOOK_AUTH_HA:
-                _bind_ha_auth_surface(hass, cfg, webhook_id, dcr_signing_key)
+                _bind_ha_auth_surface(
+                    hass, cfg, webhook_id, dcr_signing_key, per_user=per_user
+                )
             elif auth_mode == WEBHOOK_AUTH_LEGACY:
                 oauth_restart_needed = _bind_legacy_surface(
                     hass, cfg, oauth_client_id, oauth_client_secret, oauth_signing_key

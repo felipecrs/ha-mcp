@@ -528,6 +528,12 @@ def install() -> None:
     )
     setmod("homeassistant.components.http", HomeAssistantView=HomeAssistantView)
     setmod(
+        "homeassistant.components.http.auth_util",
+        async_user_not_allowed_do_auth=lambda _hass, user, _request=None: (
+            None if user.is_active else "User is not active"
+        ),
+    )
+    setmod(
         "homeassistant.components.webhook",
         async_register=MagicMock(name="async_register"),
         async_unregister=MagicMock(name="async_unregister"),
@@ -710,3 +716,5 @@ def no_direct_listener_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setitem(sys.modules, "ha_mcp.listen_sockets", None)
     monkeypatch.setitem(sys.modules, "ha_mcp.ipv6_lan_guard", None)
+    # Their fake servers take no client either: build them the plain way.
+    monkeypatch.setitem(sys.modules, "ha_mcp.user_access", None)

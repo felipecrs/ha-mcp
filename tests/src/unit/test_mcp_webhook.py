@@ -1102,7 +1102,7 @@ class TestRegisterWebhook:
             secret_path="/private_x",
             auth_mode=WEBHOOK_AUTH_HA,
         )
-        assert hass.http.register_view.call_count == 12
+        assert hass.http.register_view.call_count == 14
         assert mw.active_auth_mode(hass) == WEBHOOK_AUTH_HA
         await mw.async_unregister_webhook(hass)
 
@@ -1114,7 +1114,7 @@ class TestRegisterWebhook:
             secret_path="/private_x",
             auth_mode=WEBHOOK_AUTH_NONE,
         )
-        assert hass.http.register_view.call_count == 12
+        assert hass.http.register_view.call_count == 14
         assert mw.active_auth_mode(hass) == WEBHOOK_AUTH_NONE
 
     async def test_ha_auth_registers_resource_server_and_views(self, monkeypatch):
@@ -1135,8 +1135,8 @@ class TestRegisterWebhook:
         cfg = hass.data[DOMAIN][DATA_WEBHOOK]
         assert isinstance(cfg["resource_server"], mw.ResourceServer)
         # Six discovery + three unified OAuth (authorize/token/revoke) + one
-        # DCR view + the two webhook aliases were bound.
-        assert hass.http.register_view.call_count == 12
+        # DCR view + the two webhook aliases + the two /mcp views were bound.
+        assert hass.http.register_view.call_count == 14
         assert hass.data.get(mw._OAUTH_VIEWS_REGISTERED_KEY) is True
 
     async def test_ha_auth_isolates_cimd_fetches_from_forwarding(self, monkeypatch):
@@ -1192,7 +1192,7 @@ class TestRegisterWebhook:
             secret_path="/private_x",
             auth_mode=WEBHOOK_AUTH_HA,
         )
-        assert hass.http.register_view.call_count == 12
+        assert hass.http.register_view.call_count == 14
         await mw.async_unregister_webhook(hass)
 
         # Second enable in the same HA session: no new bindings, no raise.
@@ -1203,7 +1203,7 @@ class TestRegisterWebhook:
             secret_path="/private_x",
             auth_mode=WEBHOOK_AUTH_HA,
         )
-        assert hass.http.register_view.call_count == 12
+        assert hass.http.register_view.call_count == 14
         assert isinstance(
             hass.data[DOMAIN][DATA_WEBHOOK]["resource_server"], mw.ResourceServer
         )

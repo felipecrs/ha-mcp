@@ -48,9 +48,9 @@ class TestServerBranch:
         }
         return {**values, cf.SETUP_ADMIN_TOKEN: self.TOKEN}
 
-    def test_new_install_defaults_to_no_webhook_and_loopback_only(self):
-        # #2427 (HACS review): a fresh install exposes nothing beyond the Home
-        # Assistant machine until the admin chooses otherwise during setup.
+    def test_new_install_defaults_to_home_assistant_sign_in_and_loopback(self):
+        # The stable URL answers only a Home Assistant sign-in; the secret URL
+        # stays an explicit choice, and the direct port stays on this machine.
         flow = _make_flow()
         form = asyncio.run(flow.async_step_server(None))
         defaults = self._defaults(form)
@@ -60,7 +60,8 @@ class TestServerBranch:
         assert entry["type"] == "entry"
         assert entry["title"] == cf.SERVER_ENTRY_TITLE
         assert entry["data"][const.CONF_ENTRY_TYPE] == const.ENTRY_TYPE_SERVER
-        assert entry["options"][const.OPT_ENABLE_WEBHOOK] is False
+        assert entry["options"][const.OPT_ENABLE_WEBHOOK] is True
+        assert entry["options"][const.OPT_WEBHOOK_AUTH] == const.WEBHOOK_AUTH_HA
         assert entry["options"][const.OPT_BIND_HOST] == const.BIND_HOST_LOOPBACK
 
     def test_new_install_options_are_saved_not_inherited(self):

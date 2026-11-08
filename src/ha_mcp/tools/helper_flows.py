@@ -11,20 +11,18 @@ integration is found.
 from __future__ import annotations
 
 import time
-import weakref
 from typing import Any, NoReturn
 
 from ha_mcp._vendor.fastmcp.exceptions import ToolError
 
 from ..client.rest_client import HomeAssistantConnectionError
 from ..errors import ErrorCode, create_error_response
+from ..per_user import ClientKeyedCache
 from .config_helpers.schemas import SIMPLE_HELPER_TYPES
 from .helpers import exception_to_structured_error, raise_tool_error
 
 _TTL_SECONDS = 300.0
-_CACHE: weakref.WeakKeyDictionary[Any, tuple[float, frozenset[str]]] = (
-    weakref.WeakKeyDictionary()
-)
+_CACHE: ClientKeyedCache[tuple[float, frozenset[str]]] = ClientKeyedCache()
 
 
 async def _fetch_helper_flow_types(client: Any) -> frozenset[str]:

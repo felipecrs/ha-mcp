@@ -332,12 +332,12 @@ class HaMcpToolsConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
                     ),
                     vol.Required(
                         SETUP_REMOTE_ACCESS,
-                        default=values.get(SETUP_REMOTE_ACCESS, REMOTE_ACCESS_DISABLED),
+                        default=values.get(SETUP_REMOTE_ACCESS, WEBHOOK_AUTH_HA),
                     ): SelectSelector(
                         SelectSelectorConfig(
                             options=[
-                                REMOTE_ACCESS_DISABLED,
                                 WEBHOOK_AUTH_HA,
+                                REMOTE_ACCESS_DISABLED,
                                 WEBHOOK_AUTH_LEGACY,
                                 WEBHOOK_AUTH_NONE,
                             ],

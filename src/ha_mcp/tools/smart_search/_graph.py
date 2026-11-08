@@ -27,12 +27,12 @@ from __future__ import annotations
 import logging
 import re
 import time
-import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
 from ...errors import get_error_code, get_error_message
+from ...per_user import ClientKeyedCache
 from ..component_api import UNKNOWN_COMMAND_CODE
 
 logger = logging.getLogger(__name__)
@@ -152,7 +152,7 @@ class _Unsupported:
     since: float | None = None
 
 
-_UNSUPPORTED: weakref.WeakKeyDictionary[Any, _Unsupported] = weakref.WeakKeyDictionary()
+_UNSUPPORTED: ClientKeyedCache[_Unsupported] = ClientKeyedCache()
 
 
 def is_entity_id_shaped(value: str) -> bool:

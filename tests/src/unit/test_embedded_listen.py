@@ -41,6 +41,7 @@ def _install_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in ("listen_sockets", "ipv6_lan_guard"):
         module = _load(_SRC / f"{name}.py", f"ha_mcp.{name}")
         monkeypatch.setitem(sys.modules, f"ha_mcp.{name}", module)
+    monkeypatch.setitem(sys.modules, "ha_mcp.user_access", None)
 
 
 @pytest.fixture
@@ -64,6 +65,7 @@ def test_older_bundled_server_keeps_ipv4_bind_and_says_so(
 ) -> None:
     monkeypatch.setitem(sys.modules, "ha_mcp.listen_sockets", None)
     monkeypatch.setitem(sys.modules, "ha_mcp.ipv6_lan_guard", None)
+    monkeypatch.setitem(sys.modules, "ha_mcp.user_access", None)
     caplog.set_level(logging.INFO, logger=embedded_listen.__name__)
     listener = embedded_listen.DirectListener(BIND_HOST_ALL, _a_free_port())
     app = object()

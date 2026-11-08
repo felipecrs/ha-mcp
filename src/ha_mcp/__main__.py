@@ -53,11 +53,8 @@ logger = logging.getLogger(__name__)
 class OAuthProxyClient:
     """Proxy client that dynamically forwards to the correct OAuth-authenticated client.
 
-    This class is necessary because tools capture a reference to the client at registration time.
-    The proxy allows us to inject different credentials per-request based on OAuth token claims.
-
-    The Home Assistant URL is fixed server-side (HOMEASSISTANT_URL env var).
-    Only the access token varies per-user (from OAuth consent form).
+    Tools capture a reference to the client at registration time, so the proxy
+    injects per-request credentials from the OAuth token claims.
     """
 
     def __init__(self, ha_url: str) -> None:
@@ -66,21 +63,18 @@ class OAuthProxyClient:
         self._lock = threading.Lock()
 
     def _get_oauth_client(self) -> "HomeAssistantClient":
-        """Get the OAuth client for the current request context."""
         from ha_mcp._vendor.fastmcp.server.dependencies import get_access_token
         from ha_mcp.client.rest_client import (
             HomeAssistantAuthError,
             HomeAssistantClient,
         )
 
-        # Get the access token from the current request context
         token = get_access_token()
 
         if not token:
             logger.warning("No access token in context")
             raise HomeAssistantAuthError("No OAuth token in request context")
 
-        # Extract HA token from claims (URL is server-side config)
         claims = token.claims
 
         if not claims or "ha_token" not in claims:
@@ -93,7 +87,6 @@ class OAuthProxyClient:
 
         ha_token = claims["ha_token"]
 
-        # Hash token for cache key to avoid raw tokens appearing in dict keys
         client_key = hashlib.sha256(ha_token.encode()).hexdigest()
 
         with self._lock:
@@ -105,6 +98,13 @@ class OAuthProxyClient:
                 logger.info(f"Created OAuth client for {self._ha_url}")
 
             return self._oauth_clients[client_key]
+
+    def cache_owner(self) -> Any:
+        """Key per-client caches by this request's client, not the shared proxy."""
+        try:
+            return self._get_oauth_client()
+        except Exception:  # noqa: BLE001 - no user in context: nothing to separate
+            return self
 
     async def close(self) -> None:
         """Close all cached OAuth clients to release httpx connection pools."""

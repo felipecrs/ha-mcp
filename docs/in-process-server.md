@@ -102,8 +102,8 @@ The setup below is for version 9.0.0 (October 28, 2026) and later; earlier versi
 
    It also asks how MCP clients may reach
    the server: **Remote access through Home Assistant**
-   (disabled by default; choose Home Assistant sign-in, legacy OAuth or the
-   secret URL to let clients connect through a webhook) and **Network access**
+   (Home Assistant sign-in by default, at `<your Home Assistant URL>/mcp`; or
+   legacy OAuth, the secret URL, or disabled) and **Network access**
    (this machine only by default; choose local network to let devices on your
    network use the direct port). Submitting creates the entry and starts the
    server. (If you already have
@@ -367,11 +367,11 @@ back on until you enable the entity again.
 
 Turning access off does not revoke credentials a client already holds; when
 access is on again, they work as before. With **Authentication mode**
-`ha_auth`, a client holds a Home Assistant token of the administrator who
+`ha_auth`, a client holds a Home Assistant token of the user who
 signed in, usually a refresh token. That token also gets the client into Home
 Assistant's own API (a refresh token through the access tokens it issues),
 whatever the switch says. To end it, delete it under **Refresh tokens** (or
-**Long-lived access tokens**) on the **Security** tab of that administrator's
+**Long-lived access tokens**) on the **Security** tab of that user's
 profile. In `none` and `legacy` mode, rotating the connect secrets (see
 [Rotating your connect URL](#rotating-your-connect-url)) cuts every client off
 at once, because the old URLs stop working. A `legacy` client's tokens
@@ -423,15 +423,26 @@ The in-process server offers three authentication postures, chosen with the
   cost is that your Home Assistant address forwards a crafted sign-in link to
   any website it names, which a phishing link can use to look like it comes
   from your Home Assistant.
-- **`ha_auth`: clients sign in with your Home Assistant account.** Home Assistant
-  Core acts as the OAuth authorization server. MCP clients that support OAuth
-  (for example claude.ai and ChatGPT) discover the sign-in endpoints
-  automatically and authenticate the user against Home Assistant; requests
-  without a valid Home Assistant token are rejected. Only **administrator**
-  accounts are accepted: the server performs its Home Assistant operations with
-  its own administrator token, so a non-admin login is refused rather than
-  silently granted admin-equivalent control. There is no separate password or
-  credential to manage — it is your existing Home Assistant admin login.
+- **`ha_auth`: clients sign in with your Home Assistant account.** Connect a
+  client to the stable URL `https://<your Home Assistant>/mcp` (with the same
+  `/readonly` and `/catalog/<mode>` variants as the webhook). Home Assistant Core
+  acts as the OAuth authorization server: clients that support OAuth (for example
+  claude.ai and ChatGPT) discover the endpoints, register themselves, and send the
+  user to Home Assistant's login page; requests without a valid Home Assistant
+  token are rejected. There is no separate password or credential to manage.
+
+  Each request then runs **as the user who signed in**, with that user's token, so
+  Home Assistant applies their permissions and records them as the actor.
+  Home Assistant's permissions are broad: a regular user can read and control
+  every entity, and a read-only user can read every entity. An administrator
+  gets every tool. Anyone else gets a fixed list covering search, state,
+  history, service calls, to-do lists and calendars, because the other tools
+  touch server state Home Assistant cannot protect, such as security policies,
+  backups and saved code. Local-only accounts cannot connect from outside the
+  local network. The sidebar panel and conversation agents keep using the
+  server's own administrator access. The stable URL answers 404 in the other
+  modes. The Home Assistant Cloud cloudhook URL cannot carry a sign-in; use remote
+  UI.
 - **`legacy`: a self-hosted OAuth server with a static Client ID + Secret.** For
   clients that need a credential to paste (as of 2.0.0, `ha_auth` also serves
   Google Gemini Spark and GitHub Copilot CLI, so this is a fallback). The

@@ -92,6 +92,7 @@ def make_fake_manager(monkeypatch: pytest.MonkeyPatch) -> type:
 
     class FakeManager:
         port = 9584
+        per_user = True
         async_start = AsyncMock()
         async_stop = AsyncMock()
         async_revoke_credentials = AsyncMock()

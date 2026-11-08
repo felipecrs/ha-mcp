@@ -53,11 +53,13 @@ from .const import (
     OPT_SERVER_PORT,
     OPT_WEBHOOK_AUTH,
     SERVER_UPDATES_DOCS_URL,
+    WEBHOOK_AUTH_HA,
     WEBHOOK_AUTH_LEGACY,
     WEBHOOK_AUTH_NONE,
 )
 from .embedded_server import EmbeddedServerError, EmbeddedServerManager
 from .llm_api import async_register_llm_api, async_unregister_llm_api
+from .mcp_endpoint import MCP_PATH
 from .mcp_webhook import async_register_webhook, async_unregister_webhook
 from .oauth_legacy import legacy_credentials_active
 
@@ -126,6 +128,7 @@ async def async_bring_up_server(
             oauth_client_secret=oauth_client_secret,
             oauth_signing_key=entry.data.get(DATA_OAUTH_SIGNING_KEY),
             dcr_signing_key=entry.data.get(DATA_DCR_SIGNING_KEY),
+            per_user=manager.per_user is True,
         )
         _async_update_legacy_oauth_issue(hass, oauth_restart_needed)
         if not webhook_enabled:
@@ -297,13 +300,13 @@ def _resolve_local_url(hass: HomeAssistant) -> tuple[str | None, str | None]:
     return base, urlparse(base).hostname
 
 
-def _local_webhook_urls(
-    local_base: str, local_host: str | None, lan_hosts: list[str], webhook_id: str
+def _local_endpoint_urls(
+    local_base: str, local_host: str | None, lan_hosts: list[str], path: str
 ) -> list[str]:
-    """One local webhook URL per LAN host (canonical ``local_base`` verbatim)."""
+    """One local endpoint URL per LAN host (canonical ``local_base`` verbatim)."""
     return [
         f"{local_base if host == local_host else _swap_url_host(local_base, host)}"
-        f"/api/webhook/{webhook_id}"
+        f"{path}"
         for host in lan_hosts
     ]
 
@@ -335,10 +338,16 @@ def build_connect_urls(
         # Local-only mode: no webhook exists, so no webhook URLs to surface.
         external = ""
         webhook_id = None
+    # Home Assistant sign-in serves the stable path, which needs no secret id.
+    endpoint = (
+        MCP_PATH
+        if entry.options.get(OPT_WEBHOOK_AUTH) == WEBHOOK_AUTH_HA
+        else f"/api/webhook/{webhook_id}"
+    )
     if external:
         # Owner-requested parity with the webhook-proxy app: a configured
         # external URL leads the list (any reverse proxy, not just Nabu Casa).
-        urls.append(f"{external}/api/webhook/{webhook_id}")
+        urls.append(f"{external}{endpoint}")
 
     # Nabu Casa remote URL (only when the cloud integration is set up + logged in).
     try:
@@ -350,7 +359,7 @@ def build_connect_urls(
         try:
             if webhook_id:
                 cloud_base = async_remote_ui_url(hass)
-                urls.append(f"{cloud_base}/api/webhook/{webhook_id}")
+                urls.append(f"{cloud_base}{endpoint}")
         except CloudNotAvailable:
             pass  # Cloud not logged in / remote UI off - no remote URL to show.
     except ImportError:
@@ -364,10 +373,10 @@ def build_connect_urls(
     lan_hosts = _dedup_hosts(local_host, extra_hosts)
 
     if local_base and webhook_id:
-        urls.extend(_local_webhook_urls(local_base, local_host, lan_hosts, webhook_id))
+        urls.extend(_local_endpoint_urls(local_base, local_host, lan_hosts, endpoint))
 
     if not urls and webhook_id:
-        urls.append(f"/api/webhook/{webhook_id}  (prefix with your Home Assistant URL)")
+        urls.append(f"{endpoint}  (prefix with your Home Assistant URL)")
 
     port = int(entry.options.get(OPT_SERVER_PORT, DEFAULT_SERVER_PORT))
     bind_host = str(entry.options.get(OPT_BIND_HOST, DEFAULT_BIND_HOST))

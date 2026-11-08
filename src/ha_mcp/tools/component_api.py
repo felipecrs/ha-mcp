@@ -33,7 +33,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-import weakref
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,6 +44,7 @@ from ..client.rest_client import (
     HomeAssistantConnectionError,
 )
 from ..client.websocket_client import get_websocket_client
+from ..per_user import ClientKeyedCache
 
 logger = logging.getLogger(__name__)
 
@@ -134,28 +134,24 @@ class ComponentCaps:
 # ``_NEGATIVE_CACHE_TS`` (definitive absent, long) or ``_TRANSIENT_NEGATIVE_TS``
 # (inconclusive failure, short) — so a component installed/upgraded mid-session, or one
 # that just became reachable again, is eventually re-probed instead of pinned.
-_CAPS_CACHE: weakref.WeakKeyDictionary[Any, ComponentCaps | None] = (
-    weakref.WeakKeyDictionary()
-)
+_CAPS_CACHE: ClientKeyedCache[ComponentCaps | None] = ClientKeyedCache()
 # Monotonic timestamp a definitive ABSENT-negative was stored, keyed by the same
 # client. Inconclusive failures never use this window.
-_NEGATIVE_CACHE_TS: weakref.WeakKeyDictionary[Any, float] = weakref.WeakKeyDictionary()
+_NEGATIVE_CACHE_TS: ClientKeyedCache[float] = ClientKeyedCache()
 # Monotonic timestamp an inconclusive probe failure was stored. Also expires
 # malformed snapshots retained for permissive readers. Kept
 # separate from ``_NEGATIVE_CACHE_TS`` so the two negative kinds carry different
 # TTLs; a client is stamped in at most one of the two at a time (the store helpers
 # clear the other).
-_TRANSIENT_NEGATIVE_TS: weakref.WeakKeyDictionary[Any, float] = (
-    weakref.WeakKeyDictionary()
-)
+_TRANSIENT_NEGATIVE_TS: ClientKeyedCache[float] = ClientKeyedCache()
 # Preserve failed discovery separately so write callers can refuse a downgrade
 # even when a best-effort read populated the negative cache first. Store only
 # text, not exceptions whose traceback would retain clients through weak keys.
-_PROBE_FAILURES: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
+_PROBE_FAILURES: ClientKeyedCache[str] = ClientKeyedCache()
 # The latest probe was refused as unauthorized. Kept beside the failure text so
 # a fire tool can stop before sending with the same rejected token; read callers
 # keep treating the probe as best-effort.
-_PROBE_AUTH_REJECTED: weakref.WeakKeyDictionary[Any, str] = weakref.WeakKeyDictionary()
+_PROBE_AUTH_REJECTED: ClientKeyedCache[str] = ClientKeyedCache()
 
 
 def component_probe_auth_failed(client: Any) -> bool:
@@ -168,7 +164,7 @@ def component_probe_auth_kind(client: Any) -> str | None:
     return _PROBE_AUTH_REJECTED.get(client)
 
 
-_CAPS_LOCKS: weakref.WeakKeyDictionary[Any, asyncio.Lock] = weakref.WeakKeyDictionary()
+_CAPS_LOCKS: ClientKeyedCache[asyncio.Lock] = ClientKeyedCache()
 
 
 class ComponentDiscoveryError(RuntimeError):

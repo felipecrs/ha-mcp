@@ -29,7 +29,7 @@ def test_catalog_filter_installed_regardless_of_flag():
     for flag in (True, False):
         stub = _make_server_stub(read_only_mode=flag)
         HomeAssistantSmartMCPServer._apply_read_only_catalog_filter(stub)
-        assert stub.mcp.add_transform.call_count == 1
+        assert stub.mcp.add_transform.call_count == 2  # with the user allowlist
         args, _kwargs = stub.mcp.add_transform.call_args
         assert isinstance(args[0], ReadOnlyToolsTransform)
 
@@ -38,6 +38,6 @@ def test_middleware_installed_regardless_of_flag():
     for flag in (True, False):
         stub = _make_server_stub(read_only_mode=flag)
         HomeAssistantSmartMCPServer._apply_read_only_middleware(stub)
-        assert stub.mcp.add_middleware.call_count == 1
+        assert stub.mcp.add_middleware.call_count == 2  # with the user allowlist
         args, _kwargs = stub.mcp.add_middleware.call_args
         assert isinstance(args[0], ReadOnlyMiddleware)

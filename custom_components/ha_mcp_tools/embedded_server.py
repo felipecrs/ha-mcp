@@ -88,6 +88,7 @@ from .embedded_listen import (
     async_probe_loopback,
     default_host_origin_guard_off,
 )
+from .embedded_per_user import build_per_user_server
 from .embedded_worker_teardown import (
     shutdown_server_resources_bounded,
     teardown_worker_loop,
@@ -110,15 +111,8 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 # Readiness probe: fail the bring-up only when there is no observable startup
-# progress (no new modules landing in sys.modules, no phase advance) for this
-# long. The previous flat 90s deadline assumed real hardware imports the
-# server tree in seconds — issue #1904 (HA Green) showed a cold import alone
-# can take minutes there, and killing the still-importing worker at the
-# deadline is what created the orphaned-thread/port-collision cascade: the
-# worker cannot be joined mid-import, lingered as a zombie, and later bound
-# the port out from under the retry. The module count is process-wide (see
-# _progress_signature), so a wedged worker trips the stall budget on a quiet
-# instance and the absolute cap below at the latest.
+# progress for this long. A cold import can take minutes on small hardware
+# (#1904), and killing a still-importing worker leaves a zombie on the port.
 _READY_STALL_TIMEOUT_SECONDS = 90.0
 # Absolute ceiling on one bring-up regardless of apparent progress, matching
 # the HAOS e2e lane's own 600s readiness deadline.
@@ -302,6 +296,7 @@ class EmbeddedServerManager:
         # Compared against the installed distribution after start to detect a
         # stale-code worker (see _purge_ha_mcp_modules).
         self._running_version: str | None = None
+        self.per_user = False
         # Startup phase marker (plain attribute writes: init markers from the
         # main thread, _note_startup_phase transitions from the worker). Read
         # by the readiness poll for progress detection and error messages.
@@ -1506,7 +1501,9 @@ class EmbeddedServerManager:
         from ha_mcp.settings_ui import register_settings_routes
 
         self._note_startup_phase("building the server")
-        server = HomeAssistantSmartMCPServer()
+        server, http_app_args, self.per_user = build_per_user_server(
+            HomeAssistantSmartMCPServer, _hamcp_config.get_global_settings()
+        )
 
         # Startup observability (no secrets): confirm the in-memory connection
         # channel actually reached the settings singleton — a sentinel here means
@@ -1592,7 +1589,9 @@ class EmbeddedServerManager:
             _IMPORTING_WORKERS.discard(threading.current_thread())
 
         app, proxy_headers = listener.wrap(
-            server.mcp.http_app(path=self._secret_path, stateless_http=True)
+            server.mcp.http_app(
+                path=self._secret_path, stateless_http=True, **http_app_args
+            )
         )
         config = uvicorn.Config(
             app,

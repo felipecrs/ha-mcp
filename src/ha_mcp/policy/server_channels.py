@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from ..per_user import server_client
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +36,7 @@ async def approval_ws_client(server: Any) -> Any:
     # be three separate resolutions, with nothing tying them to one
     # client. A client with no credentials at all is the token
     # deployments' normal case: pooled default connection.
-    client = server.client
+    client = server_client(server.client)
     url: str | None
     token: str | None
     verify_ssl: bool | None
@@ -72,7 +74,7 @@ async def emit_approval_result_as(
     # and the proxy raises rather than handing back a usable client.
     # A fresh REST client over the snapshot keeps the result going
     # out as the same identity the request was announced with.
-    client = server.client
+    client = server_client(server.client)
     url: str | None
     token_value: str | None
     verify_ssl: bool | None

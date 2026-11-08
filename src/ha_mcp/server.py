@@ -19,6 +19,7 @@ from pydantic import Field
 from .config import _PACKAGE_VERSION, get_global_settings
 from .errors import ErrorCode, create_error_response
 from .http_transport import HttpTransportFastMCP as FastMCP
+from .per_user import server_client
 from .server_instructions import (
     build_skills_instructions,
     compose_instructions,
@@ -683,7 +684,7 @@ class HomeAssistantSmartMCPServer:
                 PolicyMiddleware(
                     policy_provider=_policy_provider,
                     queue=self.approval_queue,
-                    get_client=lambda: self.client,
+                    get_client=lambda: server_client(self.client),
                     ensure_decisions_listener=(
                         self.approval_response_listener.ensure_subscribed
                     ),
@@ -704,15 +705,15 @@ class HomeAssistantSmartMCPServer:
     def _apply_read_only_catalog_filter(self) -> None:
         """Install the Read Only Mode catalog filter (discussion #1569).
 
-        Always installed — :class:`ReadOnlyToolsTransform` consults the
-        live ``read_only_mode`` flag per list request, so it is a no-op
-        while the mode is off and standalone-mode toggles take effect
-        without a restart. Hides write-capable tools (``readOnlyHint``
-        not True) except the exempt mixed read/write tools, whose write
-        actions ``ReadOnlyMiddleware`` blocks at call time instead.
+        Always installed; consults the live flag per list request. Hides
+        write-capable tools except the exempt mixed read/write tools, whose
+        write actions ``ReadOnlyMiddleware`` blocks at call time instead.
+        Non-administrators' allowlist filters the catalog the same way.
         """
         from .read_only import ReadOnlyToolsTransform
+        from .user_access import UserAccessTransform
 
+        self.mcp.add_transform(UserAccessTransform())
         self.mcp.add_transform(ReadOnlyToolsTransform())
         if self.settings.read_only_mode:
             logger.info(
@@ -723,14 +724,13 @@ class HomeAssistantSmartMCPServer:
     def _apply_read_only_middleware(self) -> None:
         """Install the Read Only Mode write blocker (discussion #1569).
 
-        Always installed — consults the live flag per call, so there is
-        no per-call work beyond the flag check while the mode is off.
-        The annotation lookup uses the UNFILTERED tool list (private
-        FastMCP API, same justified usage as the settings UI and policy
-        handlers) so hidden tools still resolve to a clear structured
-        error instead of an opaque unknown-tool failure.
+        Always installed; consults the live flag per call. The UNFILTERED
+        tool list lets hidden tools resolve to a clear structured error.
         """
         from .read_only import ReadOnlyMiddleware
+        from .user_access import UserAccessMiddleware
+
+        self.mcp.add_middleware(UserAccessMiddleware())
 
         async def _list_all_tools() -> Any:
             return await self.mcp.local_provider._list_tools()
@@ -786,7 +786,7 @@ class HomeAssistantSmartMCPServer:
         from .visibility.enforcement import VisibilityInboundEnforcement
 
         self.mcp.add_middleware(
-            VisibilityInboundEnforcement(get_client=lambda: self.client)
+            VisibilityInboundEnforcement(get_client=lambda: server_client(self.client))
         )
 
     def _apply_visibility_outbound_middleware(self) -> None:
@@ -798,7 +798,7 @@ class HomeAssistantSmartMCPServer:
         from .visibility.enforcement import VisibilityOutboundEnforcement
 
         self.mcp.add_middleware(
-            VisibilityOutboundEnforcement(get_client=lambda: self.client)
+            VisibilityOutboundEnforcement(get_client=lambda: server_client(self.client))
         )
 
     _SKILL_USE_BEFORE_KEYWORDS: ClassVar[str] = SKILL_USE_BEFORE_KEYWORDS

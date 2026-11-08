@@ -261,11 +261,21 @@ choice keep the webhook on in `none` mode with LAN binding.
 - **Home Assistant account (`ha_auth`).** Home Assistant Core is the OAuth
   authorization server: the entry serves the discovery documents and
   validates inbound Bearer tokens against Home Assistant's own auth, so access
-  is gated by a Home Assistant login — and restricted to **administrator**
-  users. The server acts with its own administrator token (the caller's
-  bearer is never forwarded), so accepting any valid login would grant every
-  household member admin-equivalent control; non-admin, inactive, and
-  system-generated users are rejected. This is distinct from the beta OAuth mode
+  is gated by a Home Assistant login. Active human users of any role may sign
+  in, at the public path `/mcp` or the webhook URL; inactive and
+  system-generated users are rejected, as are local-only users connecting from
+  outside the local network. The relay forwards the validated token and the
+  user's id and role to the loopback server, which acts with that token, so Home
+  Assistant applies that user's permissions. Those permissions are what Home
+  Assistant defines: a regular user can control every entity. Because Home
+  Assistant cannot see ha-mcp's own state (security policies, saved code, backups,
+  logs), a non-administrator may also call only the allowlisted tools in
+  `src/ha_mcp/user_access.py`, enforced at call time and failing closed for
+  anything unlisted. Requests with no identity (the admin-only sidebar panel,
+  conversation agents, the direct port behind the secret path) and background
+  work keep the server's own administrator token. If the running server build
+  predates this support, the relay falls back to administrators only. This is
+  distinct from the beta OAuth mode
   below — no bespoke authorization server or self-issued token is involved, and
   revoking the user's Home Assistant token/session revokes access.
   The component-scoped authorize/token/revoke endpoints front Core's own
